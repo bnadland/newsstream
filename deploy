@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# i often forget to commit addes newssources
+git cm
+
+# update on the server
+git push && ssh root@wellenmann.de "./update-newsstream"
+
+# sync local db
+sudo -u postgres dropdb newsstream && sudo -u postgres createdb -O newsstream -E utf8 newsstream && ssh root@wellenmann.de "sudo -u postgres pg_dump newsstream" | sudo -u postgres psql newsstream

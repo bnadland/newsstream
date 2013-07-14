@@ -1,0 +1,21 @@
+@option compress: yes;
+ul { list-style-type: none; }
+li { margin-bottom: 1em; }
+
+nav a { color: white; margin: 1em; }
+nav a:hover { color: white; }
+
+.header { width: 100%; background: black; margin: 0; color: white; padding: 0.5em; font-weight: bold; }
+.subheader { width: 20%; text-align: center; font-weight: bold; padding: 0.5em; margin-bottom: 2em; color: black; float: left; }
+
+.newsstream-link { font-weight: bold; color: black;}
+
+.politics { background: lightgrey; }
+.tech { background: lightgreen; }
+.business { background: lightblue; }
+.culture { background: lightpink; }
+.design { background: black; color: white; }
+
+.rank-1 { font-size: 100%; }
+.rank-2 { font-size: 160%; }
+.rank-3 { font-size: 200%; }

@@ -1,0 +1,3 @@
+function t() {
+	$.ajax('/t');
+}
