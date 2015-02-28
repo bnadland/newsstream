@@ -9,7 +9,7 @@ import (
 	"net/http"
 )
 
-var allStories []*Story
+var allStories map[string]*Story
 
 type Subreddit struct {
 	Data struct {
@@ -80,7 +80,7 @@ func getSubreddit(stories chan *Story, name string) error {
 func indexPage(w http.ResponseWriter, req *http.Request) {
 	templateString := `
 	{{range .}}
-		<p><a href="{{.URL}}">{{.Title}}</a></p>
+		<a href="{{.URL}}">{{.Title}}</a><br>
 	{{end}}
 `
 	t, _ := template.New("index").Parse(templateString)
@@ -103,10 +103,10 @@ func main() {
 	}
 
 	go func() {
+		allStories = make(map[string]*Story)
 		for {
 			story := <-stories
-			allStories = append(allStories, story)
-			fmt.Printf("* %s (%s)\n", story.Title, story.URL)
+			allStories[story.URL] = story
 		}
 	}()
 
