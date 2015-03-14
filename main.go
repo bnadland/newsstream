@@ -1,11 +1,15 @@
 package main
 
 import (
+	"github.com/bnadland/newsstream/api"
+	"github.com/bnadland/newsstream/crawler"
 	"github.com/bnadland/newsstream/item"
 	"github.com/bnadland/newsstream/source"
 )
 
 func main() {
+	api.Init()
+
 	items := make(chan item.Item)
 	sources := make(chan source.Source)
 
@@ -29,5 +33,9 @@ func main() {
 	}
 
 	// processing items
-	item.Process(items)
+	for i := 0; i < 3; i++ {
+		go crawler.Process(items)
+	}
+
+	api.App.Run()
 }
