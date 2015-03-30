@@ -1,15 +1,21 @@
-package feed
+package main
 
 import (
-	"github.com/bnadland/newsstream/item"
 	"github.com/nmeum/go-feedparser"
 	"github.com/nmeum/go-feedparser/atom"
 	"github.com/nmeum/go-feedparser/rss"
+	"log"
 	"net/http"
 )
 
-func Get(items chan<- item.Item, feedurl string) error {
-	response, err := http.Get(feedurl)
+type FeedCrawler struct {
+	name string
+}
+
+func (crawler *FeedCrawler) Crawl(items chan<- *Item) error {
+	log.Printf("[FeedCrawler] %s\n", crawler.name)
+
+	response, err := http.Get(crawler.name)
 	if err != nil {
 		return err
 	}
@@ -22,11 +28,12 @@ func Get(items chan<- item.Item, feedurl string) error {
 	}
 
 	for _, feeditem := range feed.Items {
-		items <- item.Item{
-			Source: feedurl,
-			Title:  feeditem.Title,
-			Link:   feeditem.Link,
-			Date:   feeditem.Date,
+		items <- &Item{
+			crawlerType: "feed",
+			crawlerName: crawler.name,
+			title:       feeditem.Title,
+			link:        feeditem.Link,
+			date:        feeditem.Date,
 		}
 	}
 
