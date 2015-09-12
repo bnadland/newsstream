@@ -1,179 +1,185 @@
 package main
 
 import (
-	"errors"
+	"encoding/json"
 	"fmt"
+	"github.com/boltdb/bolt"
 	"github.com/caser/gophernews"
 	"github.com/jzelinskie/geddit"
-	"io/ioutil"
-	"net/http"
-	//	"strconv"
-	//	"github.com/jinzhu/now"
-	"github.com/PuerkitoBio/purell"
-	"github.com/jinzhu/gorm"
-	_ "github.com/lib/pq"
-	log "github.com/sirupsen/logrus"
-	"time"
 )
 
 type NewsItem struct {
-	Title       string
-	Url         string
-	Source      string
-	Raw         string `sql:"type:text"`
-	HasRaw      bool
-	Error       bool
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	PublishedAt time.Time
+	Id        string
+	Title     string
+	Url       string
+	CreatedAt int
+	Source    string
 }
 
-func saveNewsItem(db *gorm.DB, newsItem NewsItem) error {
-	defer func() {
-		if r := recover(); r != nil {
-			log.WithFields(log.Fields{"func": "saveNewsItem", "r": r}).Error("Recovered")
-		}
-	}()
-	url, err := purell.NormalizeURLString(newsItem.Url, purell.FlagsSafe)
-	if err != nil {
-		log.WithFields(log.Fields{"func": "saveNewsItem", "err": err}).Error("Url normalization failed")
-		return err
-	}
-	newsItem.Url = url
+func crawlHackernews(db *bolt.DB) {
+	source := "hackernews"
 
-	zeroTime := time.Time{}
-	if newsItem.PublishedAt == zeroTime {
-		newsItem.PublishedAt = time.Now()
-	}
-
-	if db.Where("url = ?", newsItem.Url).First(&NewsItem{}).RecordNotFound() {
-		log.WithFields(log.Fields{
-			"func":        "saveNewsItem",
-			"Title":       newsItem.Title,
-			"Url":         newsItem.Url,
-			"PublishedAt": newsItem.PublishedAt,
-		}).Info("New NewsItem")
-
-		db.Save(&newsItem)
-	}
-
-	return nil
-}
-
-func crawlSubreddit(db *gorm.DB, subreddit string) error {
-	r := geddit.NewSession("newsstream")
-
-	submissions, err := r.SubredditSubmissions(subreddit, geddit.NewSubmissions, geddit.ListingOptions{
-		Limit: 100})
-	if err != nil {
-		log.WithFields(log.Fields{"func": "main", "err": err, "subreddit": subreddit}).Error("Could not get submissions")
-		return err
-	}
-
-	for _, submission := range submissions {
-		if submission.IsSelf != true {
-			saveNewsItem(db, NewsItem{
-				Title:  submission.Title,
-				Url:    submission.URL,
-				Source: subreddit,
-			})
-		}
-	}
-
-	return nil
-}
-
-func crawlHackernews(db *gorm.DB) error {
-	hn := gophernews.NewClient()
-	if hn == nil {
-		log.WithFields(log.Fields{"func": "crawlHackernews"}).Error("Could not init hackernews client")
-		return errors.New("Could not init hackernews client")
-	}
-
-	submissionIds, err := hn.GetTop100()
-	if err != nil {
-		log.WithFields(log.Fields{"func": "crawlHackernews", "err": err}).Error("Could not get submissions")
-		return err
-	}
-
-	for _, submissionId := range submissionIds {
-		submission, err := hn.GetStory(submissionId)
+	err := db.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists([]byte(source))
 		if err != nil {
-			log.WithFields(log.Fields{"func": "crawlHackernews", "err": err, "submissionId": submissionId}).Error("Could not get submission")
-			continue
+			return err
 		}
-		saveNewsItem(db, NewsItem{
-			Title:  submission.Title,
-			Url:    submission.URL,
-			Source: "hackernews",
+		return nil
+	})
+	if err != nil {
+		fmt.Printf("Error: Cannot create bucket 'hackernews': %s\n", err)
+	}
+
+	client := gophernews.NewClient()
+	storyIds, err := client.GetTop100()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	for _, storyId := range storyIds {
+		storySeen := false
+		_ = db.View(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte(source))
+			seen := b.Get([]byte(fmt.Sprintf("%v", storyId)))
+			if seen != nil {
+				storySeen = true
+			}
+			return nil
 		})
-	}
 
-	return nil
-}
-
-func getRawBodyFromUrl(url string) (string, error) {
-	resp, err := http.Get(url)
-	if err != nil {
-		log.WithFields(log.Fields{"func": "getRawBodyFromUrl", "url": url, "err": err}).Error("Could not fetch url")
-		return "", err
-	}
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		log.WithFields(log.Fields{"func": "getRawBodyFromUrl", "url": url, "err": err}).Error("Could read response")
-		return "", err
-	}
-
-	return fmt.Sprintf("%s", body), nil
-}
-
-func crawlRawNewsItems(db *gorm.DB) error {
-	for {
-		newsItem := &NewsItem{}
-		if db.Where("raw=''").Where("error = false").First(newsItem).RecordNotFound() {
-			log.WithFields(log.Fields{"func": "crawlRawNewsItems"}).Info("No new NewsItems")
-			time.Sleep(10 * time.Second)
+		if storySeen {
 			continue
 		}
-		body, err := getRawBodyFromUrl(newsItem.Url)
+
+		story, err := client.GetStory(storyId)
 		if err != nil {
-			log.WithFields(log.Fields{"func": "crawlRawNewsItems", "err": err, "url": newsItem.Url}).Info("Could not get raw body from url")
-			newsItem.Error = true
-			db.Save(newsItem)
+			fmt.Printf("Error: Cannot get story with id %v", storyId)
 			continue
 		}
 
-		log.WithFields(log.Fields{
-			"func": "crawlRawNewsItem",
-			"Url":  newsItem.Url,
-		}).Info("Got raw body")
+		newsItem := NewsItem{
+			Id:        fmt.Sprintf("%v", story.ID),
+			Title:     story.Title,
+			Url:       story.URL,
+			CreatedAt: story.Time,
+			Source:    source,
+		}
 
-		newsItem.Raw = body
-		newsItem.Error = false
-		db.Save(newsItem)
-		time.Sleep(1 * time.Second)
+		err = db.Update(func(tx *bolt.Tx) error {
+			sourceBucket := tx.Bucket([]byte(source))
+			sourceItem, err := json.Marshal(story)
+			if err != nil {
+				return err
+			}
+			sourceBucket.Put([]byte(fmt.Sprintf("%v", storyId)), sourceItem)
+
+			newsItemBucket := tx.Bucket([]byte("newsitem"))
+			newsItemJson, err := json.Marshal(newsItem)
+			if err != nil {
+				return err
+			}
+			newsItemBucket.Put([]byte(fmt.Sprintf("%v-%v", newsItem.CreatedAt, newsItem.Id)), newsItemJson)
+
+			return nil
+		})
+		if err != nil {
+			fmt.Printf("Error: Could not save newsitem %s-%v\n", source, story.ID)
+		}
+
+		fmt.Printf("[%s] %s\n%s\n\n", source, newsItem.Title, newsItem.Url)
+	}
+}
+
+func crawlSubreddit(db *bolt.DB, source string) {
+	err := db.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists([]byte(source))
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		fmt.Printf("Error: Cannot create bucket '%s': %s\n", source, err)
+	}
+
+	client := geddit.NewSession("newsstream by /u/bnadland")
+	stories, err := client.SubredditSubmissions(source, geddit.NewSubmissions, geddit.ListingOptions{
+		Limit: 100,
+	})
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	for _, story := range stories {
+		storySeen := false
+		_ = db.View(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte(source))
+			seen := b.Get([]byte(story.ID))
+			if seen != nil {
+				storySeen = true
+			}
+			return nil
+		})
+
+		if storySeen {
+			continue
+		}
+		newsItem := NewsItem{
+			Id:        story.ID,
+			Title:     story.Title,
+			Url:       story.URL,
+			CreatedAt: int(story.DateCreated),
+			Source:    source,
+		}
+
+		err = db.Update(func(tx *bolt.Tx) error {
+			sourceBucket := tx.Bucket([]byte(source))
+			sourceItem, err := json.Marshal(story)
+			if err != nil {
+				return err
+			}
+			sourceBucket.Put([]byte(fmt.Sprintf("%v", story.ID)), sourceItem)
+
+			newsItemBucket := tx.Bucket([]byte("newsitem"))
+			newsItemJson, err := json.Marshal(newsItem)
+			if err != nil {
+				return err
+			}
+			newsItemBucket.Put([]byte(fmt.Sprintf("%v-%v", newsItem.CreatedAt, newsItem.Id)), newsItemJson)
+
+			return nil
+		})
+		if err != nil {
+			fmt.Printf("Error: Could not save newsitem %s-%v\n", source, story.ID)
+		}
+
+		fmt.Printf("[%s] %s\n%s\n\n", source, newsItem.Title, newsItem.Url)
 	}
 }
 
 func main() {
-	db, err := gorm.Open("postgres", "postgres://newsstream:newsstream@127.0.0.1?sslmode=disable")
+	db, err := bolt.Open("newsstream.db", 0600, nil)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Printf("Error: Cannot access 'newsstream.db': %s\n", err)
+		return
 	}
 	defer db.Close()
-	//db.DropTable(&NewsItem{})
-	//db.LogMode(true)
 
-	db.AutoMigrate(&NewsItem{})
-
-	/*
-		for _, subreddit := range []string{"golang", "python", "worldnews"} {
-			crawlSubreddit(&db, subreddit)
+	err = db.Update(func(tx *bolt.Tx) error {
+		_, err = tx.CreateBucketIfNotExists([]byte("newsitem"))
+		if err != nil {
+			return err
 		}
-	*/
-	/*
-		crawlHackernews(&db)
-	*/
-	crawlRawNewsItems(&db)
+		return nil
+	})
+	if err != nil {
+		fmt.Printf("Error: Cannot create bucket 'newsitem': %s\n", err)
+	}
+
+	crawlSubreddit(db, "golang")
+	crawlSubreddit(db, "python")
+	crawlSubreddit(db, "webdev")
+	crawlHackernews(db)
 }
