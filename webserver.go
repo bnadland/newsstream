@@ -11,7 +11,7 @@ import (
 func (self *Newsstream) httpIndexPage(c web.C, w http.ResponseWriter, r *http.Request) {
 
 	var items []Item
-	err := self.db.Order("created_at desc").Limit(20).Find(&items).Error
+	err := self.db.Order("created_at desc").Limit(23).Find(&items).Error
 	if err != nil {
 		self.log.Error(err)
 		http.Error(w, "Internal error", http.StatusInternalServerError)
@@ -38,7 +38,7 @@ func (self *Newsstream) httpIndexPage(c web.C, w http.ResponseWriter, r *http.Re
 		{{ range . }}
 			<div class="item">
 				<div class="content">
-					<a class="header" href="{{ .Url }}">{{ .Title }}</a>
+					<a class="big header" href="{{ .Url }}">{{ .Title }}</a>
 					<div class="description">{{ formatTime .CreatedAt }} - {{ .Source }}</div>
 				</div>
 			</div>

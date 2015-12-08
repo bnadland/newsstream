@@ -17,6 +17,8 @@ func (self *Newsstream) addCrawler(crawlerType string, source string) {
 	switch crawlerType {
 	case "reddit":
 		crawler = NewRedditCrawler(self.newItems, source, 1*time.Hour)
+	case "hackernews":
+		crawler = NewHackernewsCrawler(self.newItems, 1*time.Hour)
 	default:
 		self.log.Error("Unknown crawler type '%s'", crawlerType)
 	}

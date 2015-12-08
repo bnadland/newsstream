@@ -41,6 +41,7 @@ func NewNewsstream(config Config) (*Newsstream, error) {
 	for _, subreddit := range []string{"golang", "programming", "python", "webdev"} {
 		newsstream.addCrawler("reddit", subreddit)
 	}
+	newsstream.addCrawler("hackernews", "")
 
 	return newsstream, nil
 }
